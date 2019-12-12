@@ -1,20 +1,33 @@
 """Scrape Toronto Hydro usage data."""
+from urllib.parse import urljoin
+from typing import Tuple
+
 import requests
 import lxml.html
-from urllib.parse import urljoin
 
 
 LOGIN_URL = r"https://css.torontohydro.com/selfserve/pages/login.aspx?ReturnUrl=%2f_layouts%2fAuthenticate.aspx%3fSource%3d%252f&Source=%2f"
 USAGE_URL = r"https://css.torontohydro.com/Pages/ICFRedirect.aspx?Controller=myenergy&Action=billhistory"
 DATA_URL = r"https://myusage.torontohydro.com/cassandra/getfile/period/all/format/csv"
-# Toronto Hydro's SSL is misconfigured (intermediate certificates aren't sent by the server: https://www.ssllabs.com/ssltest/analyze.html?d=css.torontohydro.com
+# Toronto Hydro's SSL is misconfigured (intermediate certificates aren't sent 
+# by the server: https://www.ssllabs.com/ssltest/analyze.html?d=css.torontohydro.com
 # So the certificate chain is bundled here.
 CA_BUNDLE = "torontohydro_cert_bundle.pem"
 
 
-def extract_formdata(res, form_selector="*", 
-input_extractors=None):
-    """Extract form data generically from HTML content."""
+def extract_formdata(res: requests.Response, form_selector: str="*", 
+                     input_extractors: dict=None) -> Tuple[dict, dict]:
+    """Extract form data generically from HTML content.
+    Arguments:
+        res: the response from the page containing the form.
+        form_selector: an XPath attribute selector for the form.
+        input_extractors: a dict for extracting specific fields from the
+            form inputs, where each value is a function that is applied to
+            the input element.
+    Returns:
+        formattr: The form attributes.
+        formdata: The form data.
+    """
     tree = lxml.html.fromstring(res.content)
     forms = tree.xpath(f"//form[{form_selector}]")
     assert len(forms) == 1, "Number of forms selected not equal to 1."
@@ -34,15 +47,18 @@ input_extractors=None):
         return formattr, formdata, extracted_fields
 
 
-def submit_redirect_form(formattr, formdata, session=requests):
-    """Submit a form. Meant for forms where the response redirects the page (and a lack of redirect indicates failure)."""
+def submit_redirect_form(
+        formattr: dict, formdata: dict, 
+        session: requests.Session=requests) -> Tuple[requests.Session, requests.Response]:
+    """Submit a form. Meant for forms where the response redirects the page 
+    (and a lack of redirect indicates failure)."""
     res = session.request(formattr["method"], formattr["action"], data=formdata)
-    if res.url == formattr["action"]:
+    if res.url.lower() == formattr["action"].lower():
         raise ValueError("Form submission unsuccessful: expected page redirect.")
     return session, res
 
 
-def get_login_form(username, password):
+def get_login_form(username: str, password: str) -> Tuple[dict, dict]:
     """Retrieve form data entries from login page.
     This can be requested statelessly."""
     res = requests.get(LOGIN_URL, verify=CA_BUNDLE)
@@ -63,7 +79,7 @@ def get_login_form(username, password):
     return formattr, formdata
 
 
-def get_hydro_usage(username, password):
+def get_hydro_usage(username: str, password: str) -> requests.Response:
     loginattr, logindata = get_login_form(username, password)
 
     with requests.Session() as session:
@@ -73,11 +89,14 @@ def get_hydro_usage(username, password):
             # (This provides the cookies for accessing the usage page)
             session, _ = submit_redirect_form(loginattr, logindata, session)
             # Authenticate on the usage page
-            # (Accessing the usage page returns a JS-based redirect with a dynamically-generated form that needs to be submitted to get another set of authentication cookies for accessing the data...)
+            # (Accessing the usage page returns a JS-based redirect with a 
+            # dynamically-generated form that needs to be submitted to get 
+            # another set of authentication cookies for accessing the data...)
             res = session.get(USAGE_URL)
             formattr, formdata = extract_formdata(res, "@name='form'")
             session, res = submit_redirect_form(formattr, formdata, session)
             # Finally, access the CSV data
             res = session.get(DATA_URL)
+            return res
         except requests.exceptions.SSLError as e:
-            print(e)
+            raise e
