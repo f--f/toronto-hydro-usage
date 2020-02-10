@@ -9,12 +9,6 @@ import holidays  # For time-of-use categorization
 
 from scraper import get_hydro_usage
 
-# TODO:
-# Historical weather (hourly) is available from: Intl Airport
-# This returns data for the month (Day is arbitrary), so need to call multiple times
-# Ideally should cache historical data, this isn't really too many API calls
-# https://climate.weather.gc.ca/climate_data/bulk_data_e.html?format=csv&stationID=51459&Year=2002&Month=12&Day=31&timeframe=1&submit=Download+Data
-
 ONTARIO_HOLIDAYS = holidays.Canada(prov="ON")
 
 try:
@@ -67,7 +61,6 @@ def load_data(username: str, password: str) -> pd.DataFrame:
 @st.cache(ignore_hash=True)
 def generate_chart(df, yaxis, timeunit) -> alt.Chart:
     """Return an Altair chart with usage data."""
-    print(timeunit)
     chart = alt.Chart(df)
     palette = alt.Color("Time-of-use:N",
         scale=alt.Scale(domain=["On-peak", "Mid-peak", "Off-peak"],
